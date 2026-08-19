@@ -108,7 +108,7 @@
   a:hover { text-decoration: underline; }
   input[readonly] { opacity: 0.5; cursor: default; }
   .qr-wrap { position: relative; display: inline-block; width: 100%; }
-  .qr-popup { display: none; position: fixed; z-index: 9999; background: #0a0e1a; border: 1px solid var(--blue-border); border-radius: 10px; padding: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.8); pointer-events: none; }
+  .qr-popup { display: none; position: fixed; z-index: 9999; background: #ffffff; border: 1px solid #cccccc; border-radius: 10px; padding: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.25); pointer-events: none; }
   .qr-popup.visible { display: block; }
   .qr-tooltip-label { font-size: 10px; color: #8b90a0; margin-top: 8px; text-align: center; }
   .fee-high { color: var(--amber) !important; }
@@ -384,17 +384,32 @@ function renderOutputs() {
         <span>Output #${oi}</span>
         <button class="btn btn-sm btn-danger" onclick="removeOutput(${o.id})">移除</button>
       </div>
-      <div class="row">
-        <div class="field" style="flex:3;">
+      <div class="row" style="align-items:flex-start;">
+        <div class="field" style="flex:2;min-width:0;">
           <label>收款地址（bc1 / 3 / 1）</label>
-          <input id="oaddr-${o.id}" placeholder="收款地址">
+          <input id="oaddr-${o.id}" placeholder="粘贴收款地址" oninput="validateOutputAddr(${o.id})" autocomplete="off" spellcheck="false" style="width:100%;">
+          <div id="oaddr-hint-${o.id}" style="font-size:11px;margin-top:3px;min-height:14px;"></div>
         </div>
-        <div class="field" style="max-width:160px;">
-          <label>金额（聪）</label>
-          <input id="oamt-${o.id}" type="number" value="0" min="0" oninput="updateStats()">
+        <div class="field" style="max-width:180px;">
+          <label>金额（聪 / satoshi）</label>
+          <input id="oamt-${o.id}" type="number" value="0" min="0" oninput="onAmtInput(${o.id})" style="width:100%;">
+          <div id="oamt-btc-${o.id}" style="font-size:11px;margin-top:3px;color:#8b90a0;min-height:14px;"></div>
         </div>
       </div>
     </div>`).join('');
+}
+
+function onAmtInput(oid) {
+  updateStats();
+  const el  = document.getElementById('oamt-' + oid);
+  const hint = document.getElementById('oamt-btc-' + oid);
+  if (!el || !hint) return;
+  const sat = parseInt(el.value) || 0;
+  if (sat <= 0) { hint.textContent = ''; return; }
+  const btc = sat / 1e8;
+  // Format: up to 8 decimal places, trim trailing zeros
+  let btcStr = btc.toFixed(8).replace(/\.?0+$/, '');
+  hint.textContent = '≈ ' + btcStr + ' BTC';
 }
 
 function onAddrInput(id, val) {
@@ -457,6 +472,83 @@ async function fetchUTXO(id) {
   renderInputs();
 }
 
+function validateOutputAddr(oid) {
+  const el   = document.getElementById('oaddr-' + oid);
+  const hint = document.getElementById('oaddr-hint-' + oid);
+  if (!el || !hint) return;
+  const addr = el.value.trim();
+  if (!addr) { hint.textContent = ''; el.style.borderColor = ''; return; }
+  const r = checkOutputAddr(addr);
+  if (r.valid) {
+    hint.innerHTML = '<span style="color:#22c55e;">✓ ' + r.type + '</span>';
+    el.style.borderColor = '#22c55e';
+  } else {
+    hint.innerHTML = '<span style="color:#ef4444;">✗ ' + r.reason + '</span>';
+    el.style.borderColor = '#ef4444';
+  }
+}
+
+function checkOutputAddr(addr) {
+  if (!addr) return { valid: false, reason: '地址为空' };
+
+  // ── P2SH: 3 开头 ──────────────────────────────────────────
+  if (addr.startsWith('3')) {
+    // 字符集检查
+    if (!/^3[1-9A-HJ-NP-Za-km-z]{25,34}$/.test(addr))
+      return { valid: false, reason: 'P2SH 地址包含非法字符或长度有误' };
+    // Base58 解码 → 25 字节
+    const full = b58Dec(addr).padStart(50, '0');
+    if (full.length !== 50)
+      return { valid: false, reason: 'Base58 解码失败' };
+    const version   = full.slice(0, 2);
+    const payload   = full.slice(2, 42);
+    const storedCS  = full.slice(42, 50);
+    // version 必须是 0x05
+    if (version !== '05')
+      return { valid: false, reason: '非主网 P2SH 地址（version ≠ 0x05）' };
+    // checksum = SHA256(SHA256(version + payload))[:4]
+    const computed = hash256(version + payload).slice(0, 8);
+    if (computed !== storedCS)
+      return { valid: false, reason: 'Checksum 校验失败，地址有误' };
+    return { valid: true, type: 'P2SH 地址有效 ✓' };
+  }
+
+  // ── P2WPKH: bc1q 开头 ─────────────────────────────────────
+  if (/^bc1q/i.test(addr)) {
+    if (addr.length < 42 || addr.length > 43)
+      return { valid: false, reason: 'bc1q 地址长度有误（应为 42-43 字符）' };
+    if (!/^bc1q[ac-hj-np-z02-9]+$/i.test(addr))
+      return { valid: false, reason: 'bc1q 地址含非法字符' };
+    try {
+      const d = bech32Dec(addr);
+      if (!d || d.program.length !== 20)
+        return { valid: false, reason: 'Bech32 校验失败' };
+    } catch(e) { return { valid: false, reason: 'Bech32 解码异常' }; }
+    return { valid: true, type: 'P2WPKH (bc1q) 地址有效 ✓' };
+  }
+
+  // ── P2PKH: 1 开头 ─────────────────────────────────────────
+  if (addr.startsWith('1')) {
+    if (addr.length < 25 || addr.length > 34)
+      return { valid: false, reason: 'P2PKH 地址长度有误' };
+    if (!/^1[1-9A-HJ-NP-Za-km-z]+$/.test(addr))
+      return { valid: false, reason: 'P2PKH 地址含非法字符' };
+    // version 必须是 0x00
+    const full = b58Dec(addr).padStart(50, '0');
+    if (full.slice(0, 2) !== '00')
+      return { valid: false, reason: '非主网 P2PKH 地址' };
+    const computed = hash256(full.slice(0, 42)).slice(0, 8);
+    if (computed !== full.slice(42, 50))
+      return { valid: false, reason: 'Checksum 校验失败，地址有误' };
+    return { valid: true, type: 'P2PKH (1...) 地址有效 ✓' };
+  }
+
+  // 测试网 / Taproot / 未知
+  if (/^tb1|^[mn2]/i.test(addr)) return { valid: false, reason: '测试网地址，本工具仅支持主网' };
+  if (/^bc1p/i.test(addr))        return { valid: false, reason: 'Taproot(bc1p) 暂不支持' };
+  return { valid: false, reason: '无法识别的地址格式（支持 bc1q / 3 / 1）' };
+}
+
 function updateStats() {
   let totalIn = 0, count = 0;
   inputSlots.forEach(slot => { slot.selected.forEach(i => { totalIn += slot.utxos[i]?.value || 0; count++; }); });
@@ -516,54 +608,111 @@ let btcPriceFetched = false;
 const PRICE_APIS = [
   { name: 'Binance', fetch: async () => {
     const r = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT');
-    if (!r.ok) throw new Error('binance ' + r.status);
+    if (!r.ok) throw new Error(r.status);
     const d = await r.json(); return parseFloat(d.price);
-  }},
-  { name: 'CoinGecko', fetch: async () => {
-    const r = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
-    if (!r.ok) throw new Error('coingecko ' + r.status);
-    const d = await r.json(); return d.bitcoin.usd;
-  }},
-  { name: 'Coinbase', fetch: async () => {
-    const r = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot');
-    if (!r.ok) throw new Error('coinbase ' + r.status);
-    const d = await r.json(); return parseFloat(d.data.amount);
   }},
   { name: 'OKX', fetch: async () => {
     const r = await fetch('https://www.okx.com/api/v5/market/ticker?instId=BTC-USDT');
-    if (!r.ok) throw new Error('okx ' + r.status);
+    if (!r.ok) throw new Error(r.status);
     const d = await r.json(); return parseFloat(d.data[0].last);
+  }},
+  { name: 'Bybit', fetch: async () => {
+    const r = await fetch('https://api.bybit.com/v5/market/tickers?category=spot&symbol=BTCUSDT');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json(); return parseFloat(d.result.list[0].lastPrice);
   }},
   { name: 'Kraken', fetch: async () => {
     const r = await fetch('https://api.kraken.com/0/public/Ticker?pair=XBTUSD');
-    if (!r.ok) throw new Error('kraken ' + r.status);
+    if (!r.ok) throw new Error(r.status);
     const d = await r.json(); return parseFloat(d.result.XXBTZUSD.c[0]);
+  }},
+  { name: 'Coinbase', fetch: async () => {
+    const r = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json(); return parseFloat(d.data.amount);
+  }},
+  { name: 'Gate.io', fetch: async () => {
+    const r = await fetch('https://api.gateio.ws/api/v4/spot/tickers?currency_pair=BTC_USDT');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json(); return parseFloat(d[0].last);
+  }},
+  { name: 'KuCoin', fetch: async () => {
+    const r = await fetch('https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=BTC-USDT');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json(); return parseFloat(d.data.price);
+  }},
+  { name: 'Huobi', fetch: async () => {
+    const r = await fetch('https://api.huobi.pro/market/detail/merged?symbol=btcusdt');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json(); return parseFloat(d.tick.close);
+  }},
+  { name: 'CoinGecko', fetch: async () => {
+    const r = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json(); return d.bitcoin.usd;
+  }},
+  { name: 'Bitfinex', fetch: async () => {
+    const r = await fetch('https://api-pub.bitfinex.com/v2/ticker/tBTCUSD');
+    if (!r.ok) throw new Error(r.status);
+    const d = await r.json(); return parseFloat(d[6]);
   }}
 ];
 
 async function fetchBTCPrice() {
   const badge = document.getElementById('btc-price-badge');
-  for (const api of PRICE_APIS) {
-    try {
-      const price = await Promise.race([
-        api.fetch(),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 6000))
-      ]);
-      if (price && price > 0) {
-        btcPriceUSD = price;
-        btcPriceFetched = true;
-        if (badge) {
-          badge.textContent = '1 BTC = $' + price.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0}) + ' (' + api.name + ')';
-          badge.style.background = 'var(--green-bg)';
-          badge.style.color = 'var(--green)';
-          badge.style.borderColor = 'var(--green-border)';
+
+  // 所有 API 并行竞速，谁最快返回有效价格就用谁
+  const race = (api) => new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('timeout')), 8000);
+    api.fetch()
+      .then(price => {
+        clearTimeout(t);
+        if (price && price > 1000 && price < 100000000) resolve({ price, name: api.name });
+        else reject(new Error('invalid'));
+      })
+      .catch(e => { clearTimeout(t); reject(e); });
+  });
+
+  try {
+    const { price, name } = await Promise.any(PRICE_APIS.map(race));
+    btcPriceUSD = price;
+    btcPriceFetched = true;
+    if (badge) {
+      badge.textContent = '1 BTC = $' + price.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0}) + ' (' + name + ')';
+      badge.style.background = 'var(--green-bg)';
+      badge.style.color = 'var(--green)';
+      badge.style.borderColor = 'var(--green-border)';
+    }
+    recalcFee();
+  } catch(e) {
+    // Promise.any 全部失败才到这里，降级为顺序重试（更长超时）
+    for (const api of PRICE_APIS) {
+      try {
+        const price = await Promise.race([
+          api.fetch(),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 12000))
+        ]);
+        if (price && price > 1000) {
+          btcPriceUSD = price;
+          btcPriceFetched = true;
+          if (badge) {
+            badge.textContent = '1 BTC = $' + price.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0}) + ' (' + api.name + ')';
+            badge.style.background = 'var(--amber-bg)';
+            badge.style.color = 'var(--amber)';
+            badge.style.borderColor = 'var(--amber-border)';
+          }
+          recalcFee();
+          return;
         }
-        recalcFee();
-        return;
-      }
-    } catch(e) {}
+      } catch(err) {}
+    }
+    if (badge) {
+      badge.textContent = '所有价格 API 不可用';
+      badge.style.background = 'var(--red-bg)';
+      badge.style.color = 'var(--red)';
+      badge.style.borderColor = 'var(--red-border)';
+    }
   }
-  if (badge) { badge.textContent = '价格获取失败，USD 估算不可用'; }
 }
 
 function recalcFee() {
@@ -802,7 +951,7 @@ function renderResult(d) {
     const el = document.getElementById('qr-hash-canvas');
     if (el && typeof QRCode !== 'undefined') {
       el.innerHTML = '';
-      new QRCode(el, { text: d.preimageHash, width: 200, height: 200, colorDark: '#60a5fa', colorLight: '#0a0e1a', correctLevel: QRCode.CorrectLevel.M });
+      new QRCode(el, { text: d.preimageHash, width: 200, height: 200, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
     }
   }, 50);
 }
@@ -941,6 +1090,17 @@ function buildFinalTx() {
 
     const tx = parts.map(p => p.hex).join('');
 
+    // ── 构造不含 witness 的 hex（去掉 marker+flag 和所有 witness 字段）──
+    // 格式: version + inputCount + inputs + outputCount + outputs + [空白3格] + locktime
+    // marker(0001) 也去掉，还原为非 segwit 框架，供用户手动插入 witness
+    const nonWitnessParts = parts.filter(p =>
+      !p.label.startsWith('witness #')
+    );
+    // 在 locktime 前插入三个空格占位（6字符），用于标记手动插入 witness 的位置
+    const nwHex = nonWitnessParts.map(p =>
+      p.label === 'locktime' ? '   ' + p.hex : p.hex
+    ).join('');
+
     const rows = parts.map(p =>
       `<tr>
         <td style="padding:4px 10px;color:#8b90a0;white-space:nowrap;font-size:11px;">${p.label}</td>
@@ -968,15 +1128,32 @@ function buildFinalTx() {
           <tbody>${rows}</tbody>
         </table>
       </div>
+
       <div style="font-size:11px;color:#8b90a0;margin-bottom:6px;">完整 hex：</div>
       <div id="qr-tx-wrap" onmouseenter="showQR('qr-tx-tip',this)" onmouseleave="hideQR('qr-tx-tip')">
         <div class="pre-box" style="word-break:break-all;font-size:11px;cursor:crosshair;" title="鼠标悬停查看二维码">${tx}</div>
       </div>
       <div id="qr-tx-tip" class="qr-popup">
         <div id="qr-tx-canvas" style="width:220px;height:220px;"></div>
-        <div class="qr-tooltip-label">交易 Hex — 扫码传输</div>
-        <div style="font-size:10px;color:#555a6e;margin-top:4px;text-align:center;">数据较大时建议使用复制功能</div>
+        <div class="qr-tooltip-label">完整交易 Hex — 扫码传输</div>
+        <div style="font-size:10px;color:#555555;margin-top:4px;text-align:center;">数据较大时建议使用复制功能</div>
       </div>
+
+      <div style="margin-top:16px;padding-top:14px;border-top:0.5px solid var(--border);">
+        <div style="font-size:11px;color:#8b90a0;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-weight:500;">不含 Witness 的 Hex <span style="font-weight:400;color:#555a6e;">（已去除 marker/flag 及所有 witness 字段，locktime 前预留 3 个空格用于手动插入 witness）</span></span>
+          <button class="copy-btn" onclick="cp(this,'${nwHex}')">复制</button>
+        </div>
+        <div id="qr-nw-wrap" onmouseenter="showQR('qr-nw-tip',this)" onmouseleave="hideQR('qr-nw-tip')">
+          <div class="pre-box" style="word-break:break-all;font-size:11px;cursor:crosshair;color:#fcd34d;" title="鼠标悬停查看二维码">${nwHex}</div>
+        </div>
+        <div id="qr-nw-tip" class="qr-popup">
+          <div id="qr-nw-canvas" style="width:220px;height:220px;"></div>
+          <div class="qr-tooltip-label">非 Witness Hex — 扫码传输</div>
+          <div style="font-size:10px;color:#555555;margin-top:4px;text-align:center;">数据较大时建议使用复制功能</div>
+        </div>
+      </div>
+
       <div style="font-size:12px;color:#8b90a0;margin-top:12px;line-height:1.8;">
         广播方式：<br>
         · <a href="https://blockstream.info/tx/push" target="_blank">blockstream.info/tx/push</a><br>
@@ -984,18 +1161,30 @@ function buildFinalTx() {
         · <code style="background:var(--bg3);padding:2px 6px;border-radius:4px;">bitcoin-cli sendrawtransaction &lt;hex&gt;</code>
       </div>
     </div>`;
-    // generate QR for tx hex
+    // generate QR for full tx hex
     setTimeout(() => {
       const el = document.getElementById('qr-tx-canvas');
       if (el && typeof QRCode !== 'undefined') {
         el.innerHTML = '';
         try {
-          new QRCode(el, { text: tx, width: 220, height: 220, colorDark: '#97C459', colorLight: '#0a0e1a', correctLevel: QRCode.CorrectLevel.L });
+          new QRCode(el, { text: tx, width: 220, height: 220, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.L });
         } catch(e) {
           el.innerHTML = '<div style="color:#8b90a0;font-size:10px;padding:8px;">数据过大，无法生成二维码，请使用复制功能</div>';
         }
       }
     }, 50);
+    // generate QR for non-witness hex
+    setTimeout(() => {
+      const el2 = document.getElementById('qr-nw-canvas');
+      if (el2 && typeof QRCode !== 'undefined') {
+        el2.innerHTML = '';
+        try {
+          new QRCode(el2, { text: nwHex, width: 220, height: 220, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.L });
+        } catch(e) {
+          el2.innerHTML = '<div style="color:#8b90a0;font-size:10px;padding:8px;">数据过大，无法生成二维码，请使用复制功能</div>';
+        }
+      }
+    }, 80);
   } catch (e) {
     document.getElementById('final-box').innerHTML = `<div class="alert alert-err">构造失败: ${e.message}</div>`;
   }
