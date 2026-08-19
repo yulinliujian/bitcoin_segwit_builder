@@ -1,0 +1,1029 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; connect-src https://blockstream.info https://mempool.space https://api.blockchair.com https://blockchain.info https://chain.api.btc.com https://sochain.com https://api.binance.com https://api.coingecko.com https://api.coinbase.com https://www.okx.com https://api.kraken.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-src 'none'; object-src 'none';">
+<title>Bitcoin SegWit Preimage Builder</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/js-sha256/0.9.0/sha256.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0f1117; --bg2: #1a1d27; --bg3: #22263a;
+    --border: rgba(255,255,255,0.1); --border2: rgba(255,255,255,0.18);
+    --text: #e8eaf0; --text2: #8b90a0; --text3: #555a6e;
+    --blue: #3b82f6; --blue-bg: rgba(59,130,246,0.12); --blue-border: rgba(59,130,246,0.35);
+    --green: #22c55e; --green-bg: rgba(34,197,94,0.1); --green-border: rgba(34,197,94,0.3);
+    --amber: #f59e0b; --amber-bg: rgba(245,158,11,0.1); --amber-border: rgba(245,158,11,0.3);
+    --red: #ef4444; --red-bg: rgba(239,68,68,0.1); --red-border: rgba(239,68,68,0.3);
+    --orange: #f97316;
+    --radius: 8px; --radius-lg: 12px;
+    --font-mono: 'Courier New', 'Consolas', monospace;
+  }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; line-height: 1.6; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 24px 16px 60px; }
+  .header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+  .logo { width: 40px; height: 40px; border-radius: 10px; background: var(--orange); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .logo svg { width: 22px; height: 22px; }
+  .header-title { font-size: 18px; font-weight: 600; }
+  .header-sub { font-size: 12px; color: var(--text2); margin-top: 2px; }
+  .tab-row { display: flex; gap: 4px; margin-bottom: 20px; }
+  .tab { font-size: 13px; padding: 6px 16px; border-radius: var(--radius); border: 1px solid var(--border); background: transparent; color: var(--text2); cursor: pointer; transition: all .15s; }
+  .tab:hover { background: var(--bg2); color: var(--text); }
+  .tab.on { background: var(--blue-bg); color: var(--blue); border-color: var(--blue-border); }
+  .card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px 20px; margin-bottom: 16px; }
+  .sec-title { font-size: 11px; font-weight: 600; color: var(--text2); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
+  .row { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 10px; flex-wrap: wrap; }
+  .field { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+  .field label { font-size: 11px; color: var(--text2); }
+  .field input, .field select, .field textarea {
+    font-family: var(--font-mono); font-size: 12px;
+    background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text); padding: 7px 10px; outline: none; transition: border .15s;
+  }
+  .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--blue-border); }
+  .field textarea { resize: vertical; min-height: 60px; }
+  .btn { font-size: 12px; font-weight: 500; padding: 7px 14px; border-radius: var(--radius); border: 1px solid var(--border2); background: transparent; color: var(--text); cursor: pointer; transition: all .15s; white-space: nowrap; }
+  .btn:hover { background: var(--bg3); }
+  .btn-primary { background: var(--blue-bg); color: var(--blue); border-color: var(--blue-border); }
+  .btn-primary:hover { background: rgba(59,130,246,0.22); }
+  .btn-lg { font-size: 14px; padding: 10px 20px; }
+  .btn-sm { font-size: 11px; padding: 4px 10px; }
+  .btn-danger:hover { color: var(--red); border-color: var(--red-border); }
+  .inp-block { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 10px; }
+  .inp-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .inp-hdr-left { font-size: 12px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+  .badge { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 20px; font-weight: 500; }
+  .badge-blue { background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue-border); }
+  .badge-amber { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border); }
+  .badge-green { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+  .badge-red { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-border); }
+  .badge-gray { background: var(--bg3); color: var(--text2); border: 1px solid var(--border); }
+  .utxo-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 11px; }
+  .utxo-table th { font-size: 10px; font-weight: 600; color: var(--text3); padding: 5px 8px; text-align: left; border-bottom: 1px solid var(--border); }
+  .utxo-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); color: var(--text); vertical-align: middle; }
+  .utxo-table tr:last-child td { border-bottom: none; }
+  .utxo-table tr.sel { background: var(--blue-bg); }
+  .utxo-table tr.sel td:first-child { border-left: 2px solid var(--blue); padding-left: 6px; }
+  .utxo-table tr:hover:not(.sel) { background: rgba(255,255,255,0.03); }
+  .utxo-table input[type=checkbox] { cursor: pointer; accent-color: var(--blue); width: 14px; height: 14px; }
+  .stat-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .stat { background: var(--bg3); border-radius: var(--radius); padding: 12px 14px; border: 1px solid var(--border); }
+  .stat-label { font-size: 11px; color: var(--text2); margin-bottom: 4px; }
+  .stat-val { font-size: 18px; font-weight: 600; font-family: var(--font-mono); color: var(--text); }
+  .alert { padding: 10px 14px; border-radius: var(--radius); font-size: 12px; margin-bottom: 12px; line-height: 1.7; }
+  .alert-info { background: var(--blue-bg); color: #93c5fd; border: 1px solid var(--blue-border); }
+  .alert-err { background: var(--red-bg); color: #fca5a5; border: 1px solid var(--red-border); }
+  .alert-ok { background: var(--green-bg); color: #86efac; border: 1px solid var(--green-border); }
+  .alert-warn { background: var(--amber-bg); color: #fcd34d; border: 1px solid var(--amber-border); }
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border2); border-top-color: var(--blue); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg) } }
+  .divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+  .pre-box { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; font-family: var(--font-mono); font-size: 11px; word-break: break-all; line-height: 2; }
+  .hash-box { background: #020c1b; border: 1px solid var(--blue-border); border-radius: var(--radius); padding: 12px 14px; font-family: var(--font-mono); font-size: 13px; color: #60a5fa; word-break: break-all; letter-spacing: .03em; }
+  .pre-v { color: #86efac; }
+  .pre-hi { color: #fcd34d; }
+  .pre-sq { color: #6ee7b7; }
+  .pre-op { color: #fbcfe8; }
+  .pre-sc { color: #f0abfc; }
+  .pre-am { color: #93c5fd; }
+  .pre-ho { color: #fda4af; }
+  .pre-lk { color: #94a3b8; }
+  .legend-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+  .lg-item { font-size: 11px; display: flex; align-items: center; gap: 5px; color: var(--text2); }
+  .lg-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+  .out-block { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 10px; }
+  .out-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 12px; font-weight: 500; }
+  .copy-btn { font-size: 10px; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border); background: transparent; color: var(--text2); cursor: pointer; transition: all .15s; }
+  .copy-btn:hover { background: var(--bg3); color: var(--text); }
+  .copy-btn.copied { color: var(--green); border-color: var(--green-border); }
+  .api-status { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .api-pill { font-size: 10px; padding: 3px 9px; border-radius: 20px; border: 1px solid var(--border); color: var(--text2); }
+  .api-pill.trying { border-color: var(--amber-border); color: var(--amber); background: var(--amber-bg); }
+  .api-pill.ok { border-color: var(--green-border); color: var(--green); background: var(--green-bg); }
+  .api-pill.fail { border-color: var(--red-border); color: var(--text3); text-decoration: line-through; }
+  .action-row { display: flex; gap: 8px; margin-bottom: 16px; }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  input[readonly] { opacity: 0.5; cursor: default; }
+  .qr-wrap { position: relative; display: inline-block; width: 100%; }
+  .qr-popup { display: none; position: fixed; z-index: 9999; background: #0a0e1a; border: 1px solid var(--blue-border); border-radius: 10px; padding: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.8); pointer-events: none; }
+  .qr-popup.visible { display: block; }
+  .qr-tooltip-label { font-size: 10px; color: #8b90a0; margin-top: 8px; text-align: center; }
+  .fee-high { color: var(--amber) !important; }
+  .fee-extreme { color: var(--red) !important; }
+  .stat.fee-high-bg { background: var(--amber-bg) !important; border: 1px solid var(--amber-border) !important; }
+  .stat.fee-extreme-bg { background: var(--red-bg) !important; border: 1px solid var(--red-border) !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="header">
+    <div class="logo">
+      <svg viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="9" stroke="#fff" stroke-width="1.5"/>
+        <path d="M9 8h4.5a2 2 0 010 4H9m0 0h5a2 2 0 010 4H9m0-8v8m2-10v12" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div>
+      <div class="header-title">Bitcoin SegWit Preimage Builder</div>
+      <div class="header-sub">BIP143 · 多 API 自动容错 UTXO 查询 · 离线签名构造工具</div>
+    </div>
+  </div>
+
+  <div class="tab-row">
+    <button class="tab on" onclick="goTab('build',this)">构造交易</button>
+    <button class="tab" onclick="goTab('broadcast',this)">合并签名广播</button>
+  </div>
+
+  <div id="pane-build">
+    <div class="card">
+      <div class="sec-title">Inputs — 地址 &amp; UTXO 选择</div>
+      <div id="inputs-wrap"></div>
+      <button class="btn btn-sm" onclick="addInputSlot()" style="margin-top:6px;">+ 添加地址</button>
+    </div>
+
+    <div class="card">
+      <div class="sec-title">Outputs — 收款地址</div>
+      <div id="outputs-wrap"></div>
+      <button class="btn btn-sm" onclick="addOutput()" style="margin-top:6px;">+ 添加收款地址</button>
+    </div>
+
+    <div class="card">
+      <div class="sec-title">交易参数</div>
+      <div class="row">
+        <div class="field" style="max-width:160px;"><label>签名 Input 序号</label><input id="sign-idx" type="number" value="0" min="0"></div>
+        <div class="field" style="max-width:140px;"><label>Version</label><input value="02000000" readonly></div>
+        <div class="field" style="max-width:140px;"><label>Locktime</label><input value="00000000" readonly></div>
+        <div class="field" style="max-width:140px;"><label>Sighash</label><input value="01000000" readonly></div>
+      </div>
+    </div>
+
+    <div id="stat-summary" style="display:none;" class="stat-row">
+      <div class="stat"><div class="stat-label">选中 UTXOs</div><div class="stat-val" id="s-count">0</div></div>
+      <div class="stat"><div class="stat-label">总输入 (聪)</div><div class="stat-val" id="s-in">0</div></div>
+      <div class="stat"><div class="stat-label">总输出 (聪)</div><div class="stat-val" id="s-out">0</div></div>
+    </div>
+
+    <div class="card" id="fee-card" style="display:none;">
+      <div class="sec-title" style="display:flex;justify-content:space-between;align-items:center;">
+        <span>手续费</span>
+        <span id="btc-price-badge" style="font-size:10px;padding:2px 8px;border-radius:20px;background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber-border);">正在获取 BTC 价格...</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;">
+        <div class="stat"><div class="stat-label">手续费 (聪)</div><div class="stat-val" id="fee-sat">—</div></div>
+        <div class="stat"><div class="stat-label">手续费 (BTC)</div><div class="stat-val" id="fee-btc" style="font-size:14px;">—</div></div>
+        <div class="stat"><div class="stat-label">手续费 (USD)</div><div class="stat-val" id="fee-usd" style="font-size:14px;">—</div></div>
+      </div>
+      <div id="fee-warn" style="margin-top:8px;"></div>
+    </div>
+
+    <div class="action-row">
+      <button class="btn btn-primary btn-lg" onclick="buildPreimage()" style="flex:1;">生成 Preimage + HASH256</button>
+      <button class="btn btn-lg" onclick="clearAll()">清空</button>
+    </div>
+
+    <div id="err-box"></div>
+    <div id="result-box"></div>
+  </div>
+
+  <div id="pane-broadcast" style="display:none;">
+    <div class="card">
+      <div class="sec-title">填入签名数据</div>
+      <div class="alert alert-info">在"构造交易"页生成 HASH256 后，用私钥离线签名，将 DER 签名填入下方，构造可广播的原始交易。</div>
+      <div id="sig-wrap"></div>
+      <button class="btn btn-primary btn-lg" onclick="buildFinalTx()" style="margin-top:12px;">构造最终交易 hex</button>
+    </div>
+    <div id="final-box"></div>
+  </div>
+
+</div>
+
+<script>
+let inputSlots = [], outputs = [], lastPD = null, uid = 0;
+
+// ── Security: sanitize all data coming from external APIs ──
+function sanitizeHex(s, expectedLen) {
+  if (typeof s !== 'string') return null;
+  const clean = s.toLowerCase().replace(/[^0-9a-f]/g, '');
+  if (expectedLen && clean.length !== expectedLen) return null;
+  return clean;
+}
+function sanitizeInt(n) {
+  const v = parseInt(n, 10);
+  return (isFinite(v) && v >= 0) ? v : null;
+}
+function sanitizeBtcAddr(s) {
+  if (typeof s !== 'string') return '';
+  // only allow base58 and bech32 chars, max 90 chars
+  return s.replace(/[^a-zA-Z0-9]/g, '').slice(0, 90);
+}
+function sanitizeUtxoList(utxos) {
+  if (!Array.isArray(utxos)) return [];
+  return utxos.map(u => {
+    const txid = sanitizeHex(u.txid, 64);
+    const vout = sanitizeInt(u.vout);
+    const value = sanitizeInt(u.value);
+    if (!txid || vout === null || value === null) return null;
+    return { txid, vout, value, confirmed: !!u.confirmed, block_height: sanitizeInt(u.block_height) };
+  }).filter(Boolean);
+}
+
+const APIS = [
+  {
+    name: 'Blockstream',
+    fetch: async (addr) => {
+      const r = await fetch(`https://blockstream.info/api/address/${addr}/utxo`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      return d.map(u => ({ txid: u.txid, vout: u.vout, value: u.value, confirmed: u.status?.confirmed, block_height: u.status?.block_height }));
+    }
+  },
+  {
+    name: 'Mempool.space',
+    fetch: async (addr) => {
+      const r = await fetch(`https://mempool.space/api/address/${addr}/utxo`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      return d.map(u => ({ txid: u.txid, vout: u.vout, value: u.value, confirmed: u.status?.confirmed, block_height: u.status?.block_height }));
+    }
+  },
+  {
+    name: 'Blockchair',
+    fetch: async (addr) => {
+      const r = await fetch(`https://api.blockchair.com/bitcoin/outputs?q=recipient(${addr}),is_spent(false)&fields=transaction_hash,index,value,block_id&limit=100`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      if (!d.data) throw new Error('no data');
+      return d.data.map(u => ({ txid: u.transaction_hash, vout: u.index, value: u.value, confirmed: u.block_id > 0, block_height: u.block_id > 0 ? u.block_id : null }));
+    }
+  },
+  {
+    name: 'Blockchain.info',
+    fetch: async (addr) => {
+      const r = await fetch(`https://blockchain.info/unspent?active=${addr}&cors=true`);
+      if (r.status === 500) return [];
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      return (d.unspent_outputs || []).map(u => ({ txid: u.tx_hash_big_endian, vout: u.tx_output_n, value: u.value, confirmed: u.confirmations > 0, block_height: null }));
+    }
+  },
+  {
+    name: 'BTC.com',
+    fetch: async (addr) => {
+      const r = await fetch(`https://chain.api.btc.com/v3/address/${addr}/unspent`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      if (d.err_no !== 0) throw new Error(d.err_msg || 'api error');
+      return (d.data?.list || []).map(u => ({ txid: u.tx_hash, vout: u.tx_output_n, value: u.value, confirmed: u.confirmations > 0, block_height: null }));
+    }
+  },
+  {
+    name: 'SoChain',
+    fetch: async (addr) => {
+      const r = await fetch(`https://sochain.com/api/v2/get_tx_unspent/BTC/${addr}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const d = await r.json();
+      if (d.status !== 'success') throw new Error('api error');
+      return (d.data?.txs || []).map(u => ({ txid: u.txid, vout: parseInt(u.output_no), value: Math.round(parseFloat(u.value) * 1e8), confirmed: !!u.block_no, block_height: u.block_no || null }));
+    }
+  }
+];
+
+function goTab(name, el) {
+  document.getElementById('pane-build').style.display = name === 'build' ? '' : 'none';
+  document.getElementById('pane-broadcast').style.display = name === 'broadcast' ? '' : 'none';
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
+  el.classList.add('on');
+  if (name === 'broadcast') renderSigWrapSafe();
+}
+
+function addInputSlot() {
+  inputSlots.push({ id: ++uid, utxos: [], selected: [], addr: '', addrType: '', loading: false, fetchErr: '', apiLog: [], loadingMsg: '' });
+  renderInputs();
+}
+function removeSlot(id) { inputSlots = inputSlots.filter(s => s.id !== id); renderInputs(); }
+function addOutput() { outputs.push({ id: ++uid }); renderOutputs(); }
+function removeOutput(id) { outputs = outputs.filter(o => o.id !== id); renderOutputs(); }
+
+function renderInputs() {
+  const w = document.getElementById('inputs-wrap');
+  w.innerHTML = inputSlots.map((slot, si) => {
+    const typeBadge = slot.addrType === 'p2wpkh' ? '<span class="badge badge-blue">P2WPKH</span>' :
+      slot.addrType === 'p2sh' ? '<span class="badge badge-amber">P2SH-P2WPKH</span>' : '';
+    const apiPills = slot.apiLog.length ? `<div class="api-status">${slot.apiLog.map(l => `<span class="api-pill ${l.state}">${l.name}</span>`).join('')}</div>` : '';
+
+    let utxoArea = '';
+    if (slot.loading) {
+      utxoArea = `<div style="font-size:12px;color:#8b90a0;margin-top:10px;"><span class="spinner"></span>${slot.loadingMsg || '正在查询...'}</div>${apiPills}`;
+    } else if (slot.fetchErr) {
+      utxoArea = `<div class="alert alert-err" style="margin-top:10px;">${slot.fetchErr}</div>${apiPills}`;
+    } else if (slot.utxos.length > 0) {
+      const selTotal = slot.selected.reduce((a, i) => a + slot.utxos[i].value, 0);
+      utxoArea = `
+        ${apiPills}
+        <div style="overflow-x:auto;margin-top:10px;">
+          <table class="utxo-table">
+            <thead><tr><th style="width:28px;"></th><th>TXID</th><th>Vout</th><th>金额 (聪)</th><th>确认</th></tr></thead>
+            <tbody>${slot.utxos.map((u, ui) => {
+              const chk = slot.selected.includes(ui);
+              const conf = u.confirmed
+                ? `<span class="badge badge-green">${u.block_height ? u.block_height : '已确认'}</span>`
+                : `<span class="badge badge-amber">未确认</span>`;
+              return `<tr class="${chk ? 'sel' : ''}" onclick="toggleUTXO(${slot.id},${ui})" style="cursor:pointer;">
+                <td><input type="checkbox" ${chk ? 'checked' : ''} onclick="event.stopPropagation();toggleUTXO(${slot.id},${ui})"></td>
+                <td title="${u.txid}">${u.txid.slice(0, 14)}...${u.txid.slice(-10)}</td>
+                <td>${u.vout}</td>
+                <td>${u.value.toLocaleString()}</td>
+                <td>${conf}</td>
+              </tr>`;
+            }).join('')}</tbody>
+          </table>
+        </div>
+        <div style="font-size:11px;color:#8b90a0;margin-top:6px;display:flex;gap:8px;align-items:center;">
+          <span>已选 <strong style="color:#e8eaf0;">${slot.selected.length}</strong>/${slot.utxos.length} · 合计 <strong style="color:#e8eaf0;">${selTotal.toLocaleString()}</strong> 聪</span>
+          <button class="copy-btn" onclick="selectAll(${slot.id})">全选</button>
+          <button class="copy-btn" onclick="selectNone(${slot.id})">全不选</button>
+        </div>`;
+    } else if (slot.utxos.length === 0 && !slot.loading && !slot.fetchErr && slot.apiLog.length) {
+      utxoArea = `<div class="alert alert-warn" style="margin-top:10px;">该地址暂无 UTXO（余额为零或已全部花费）。</div>${apiPills}`;
+    }
+
+    const scField = slot.addrType === 'p2sh' ? `
+      <div class="field" style="margin-top:8px;">
+        <label>ScriptCode（P2SH-P2WPKH，手动填入 hex，如 1976a914...88ac）</label>
+        <input id="sc-${slot.id}" placeholder="1976a914...88ac">
+      </div>` : '';
+
+    return `<div class="inp-block">
+      <div class="inp-hdr">
+        <div class="inp-hdr-left">Input 地址 #${si} ${typeBadge}</div>
+        <button class="btn btn-sm btn-danger" onclick="removeSlot(${slot.id})">移除</button>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>地址（bc1q... 或 3...）</label>
+          <input id="addr-${slot.id}" placeholder="粘贴 Bitcoin 地址后点击查询" value="${slot.addr}" oninput="onAddrInput(${slot.id},this.value)">
+        </div>
+        <button class="btn btn-primary" onclick="fetchUTXO(${slot.id})">查询 UTXO</button>
+      </div>
+      ${scField}
+      ${utxoArea}
+    </div>`;
+  }).join('');
+  updateStats();
+}
+
+function renderOutputs() {
+  const w = document.getElementById('outputs-wrap');
+  w.innerHTML = outputs.map((o, oi) => `
+    <div class="out-block">
+      <div class="out-hdr">
+        <span>Output #${oi}</span>
+        <button class="btn btn-sm btn-danger" onclick="removeOutput(${o.id})">移除</button>
+      </div>
+      <div class="row">
+        <div class="field" style="flex:3;">
+          <label>收款地址（bc1 / 3 / 1）</label>
+          <input id="oaddr-${o.id}" placeholder="收款地址">
+        </div>
+        <div class="field" style="max-width:160px;">
+          <label>金额（聪）</label>
+          <input id="oamt-${o.id}" type="number" value="0" min="0" oninput="updateStats()">
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function onAddrInput(id, val) {
+  const slot = inputSlots.find(s => s.id === id); if (!slot) return;
+  slot.addr = val.trim();
+  slot.addrType = val.toLowerCase().startsWith('bc1q') ? 'p2wpkh' : val.startsWith('3') ? 'p2sh' : '';
+  slot.utxos = []; slot.selected = []; slot.fetchErr = ''; slot.apiLog = [];
+  renderInputs();
+}
+
+function selectAll(id) { const s = inputSlots.find(x => x.id === id); if (s) { s.selected = s.utxos.map((_, i) => i); renderInputs(); } }
+function selectNone(id) { const s = inputSlots.find(x => x.id === id); if (s) { s.selected = []; renderInputs(); } }
+function toggleUTXO(slotId, ui) {
+  const slot = inputSlots.find(s => s.id === slotId); if (!slot) return;
+  const idx = slot.selected.indexOf(ui);
+  if (idx >= 0) slot.selected.splice(idx, 1); else slot.selected.push(ui);
+  renderInputs();
+}
+
+async function fetchUTXO(id) {
+  const slot = inputSlots.find(s => s.id === id); if (!slot) return;
+  const addrEl = document.getElementById(`addr-${id}`);
+  const addr = addrEl ? addrEl.value.trim() : slot.addr || '';
+  slot.addr = addr;
+  if (!addr) { slot.fetchErr = '请先填写地址'; renderInputs(); return; }
+  slot.loading = true; slot.fetchErr = ''; slot.utxos = []; slot.selected = []; slot.apiLog = [];
+  renderInputs();
+
+  let success = false;
+  for (const api of APIS) {
+    slot.apiLog.push({ name: api.name, state: 'trying' });
+    slot.loadingMsg = `正在尝试 ${api.name}...（${slot.apiLog.length}/${APIS.length}）`;
+    renderInputs();
+    try {
+      const utxos = await Promise.race([
+        api.fetch(addr),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000))
+      ]);
+      slot.apiLog[slot.apiLog.length - 1].state = 'ok';
+      const sanitized = sanitizeUtxoList(utxos);
+      sanitized.sort((a, b) => b.value - a.value);
+      slot.utxos = sanitized;
+      slot.selected = utxos.map((_, i) => i);
+      slot.addrType = addr.toLowerCase().startsWith('bc1q') ? 'p2wpkh' : addr.startsWith('3') ? 'p2sh' : '';
+      success = true;
+      break;
+    } catch (e) {
+      slot.apiLog[slot.apiLog.length - 1].state = 'fail';
+    }
+  }
+
+  slot.loading = false;
+  if (!success) {
+    slot.fetchErr = `所有 ${APIS.length} 个 API 均查询失败，请检查：<br>
+      &nbsp;1. 网络是否可正常访问外部域名<br>
+      &nbsp;2. 是否开启了代理/VPN（尝试切换或关闭）<br>
+      &nbsp;3. 地址格式是否正确<br><br>
+      如仍失败，请手动在下方直接填写 TXID 和 Vout。`;
+  }
+  renderInputs();
+}
+
+function updateStats() {
+  let totalIn = 0, count = 0;
+  inputSlots.forEach(slot => { slot.selected.forEach(i => { totalIn += slot.utxos[i]?.value || 0; count++; }); });
+  let totalOut = 0;
+  outputs.forEach(o => { const el = document.getElementById(`oamt-${o.id}`); totalOut += el ? parseInt(el.value) || 0 : 0; });
+  document.getElementById('s-count').textContent = count;
+  document.getElementById('s-in').textContent = totalIn.toLocaleString();
+  document.getElementById('s-out').textContent = totalOut.toLocaleString();
+  document.getElementById('stat-summary').style.display = (count > 0 || outputs.length > 0) ? '' : 'none';
+  recalcFee();
+}
+
+// ── BTC price & fee calc ──
+// ── QR popup: fixed position top-right of trigger element, debounced ──
+let qrHideTimers = {};
+function showQR(popupId, triggerEl) {
+  clearTimeout(qrHideTimers[popupId]);
+  const popup = document.getElementById(popupId);
+  if (!popup) return;
+  // make visible off-screen first to measure real dimensions
+  popup.style.visibility = 'hidden';
+  popup.style.left = '0px';
+  popup.style.top = '0px';
+  popup.classList.add('visible');
+  const popupW = popup.offsetWidth || 244;
+  const popupH = popup.offsetHeight || 260;
+  popup.style.visibility = '';
+  const rect = triggerEl.getBoundingClientRect();
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const margin = 8;
+  // horizontal: align right edge of popup to right edge of trigger, clamp to viewport
+  let left = rect.right - popupW;
+  if (left < margin) left = margin;
+  if (left + popupW > vw - margin) left = vw - popupW - margin;
+  // vertical: try to show popup so its bottom aligns above trigger bottom,
+  // prefer above-center of trigger, then shift up if it overflows viewport bottom
+  let top = rect.top - 4;
+  if (top + popupH > vh - margin) {
+    // shift up so popup bottom sits above taskbar
+    top = vh - popupH - margin;
+  }
+  if (top < margin) top = margin;
+  popup.style.left = left + 'px';
+  popup.style.top = top + 'px';
+}
+function hideQR(popupId) {
+  qrHideTimers[popupId] = setTimeout(() => {
+    const popup = document.getElementById(popupId);
+    if (popup) popup.classList.remove('visible');
+  }, 120);
+}
+
+let btcPriceUSD = null;
+let btcPriceFetched = false;
+
+const PRICE_APIS = [
+  { name: 'Binance', fetch: async () => {
+    const r = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT');
+    if (!r.ok) throw new Error('binance ' + r.status);
+    const d = await r.json(); return parseFloat(d.price);
+  }},
+  { name: 'CoinGecko', fetch: async () => {
+    const r = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd');
+    if (!r.ok) throw new Error('coingecko ' + r.status);
+    const d = await r.json(); return d.bitcoin.usd;
+  }},
+  { name: 'Coinbase', fetch: async () => {
+    const r = await fetch('https://api.coinbase.com/v2/prices/BTC-USD/spot');
+    if (!r.ok) throw new Error('coinbase ' + r.status);
+    const d = await r.json(); return parseFloat(d.data.amount);
+  }},
+  { name: 'OKX', fetch: async () => {
+    const r = await fetch('https://www.okx.com/api/v5/market/ticker?instId=BTC-USDT');
+    if (!r.ok) throw new Error('okx ' + r.status);
+    const d = await r.json(); return parseFloat(d.data[0].last);
+  }},
+  { name: 'Kraken', fetch: async () => {
+    const r = await fetch('https://api.kraken.com/0/public/Ticker?pair=XBTUSD');
+    if (!r.ok) throw new Error('kraken ' + r.status);
+    const d = await r.json(); return parseFloat(d.result.XXBTZUSD.c[0]);
+  }}
+];
+
+async function fetchBTCPrice() {
+  const badge = document.getElementById('btc-price-badge');
+  for (const api of PRICE_APIS) {
+    try {
+      const price = await Promise.race([
+        api.fetch(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 6000))
+      ]);
+      if (price && price > 0) {
+        btcPriceUSD = price;
+        btcPriceFetched = true;
+        if (badge) {
+          badge.textContent = '1 BTC = $' + price.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0}) + ' (' + api.name + ')';
+          badge.style.background = 'var(--green-bg)';
+          badge.style.color = 'var(--green)';
+          badge.style.borderColor = 'var(--green-border)';
+        }
+        recalcFee();
+        return;
+      }
+    } catch(e) {}
+  }
+  if (badge) { badge.textContent = '价格获取失败，USD 估算不可用'; }
+}
+
+function recalcFee() {
+  let totalIn = 0, count = 0;
+  inputSlots.forEach(slot => { slot.selected.forEach(i => { totalIn += slot.utxos[i]?.value || 0; count++; }); });
+  let totalOut = 0;
+  outputs.forEach(o => { const el = document.getElementById('oamt-' + o.id); totalOut += el ? (parseInt(el.value) || 0) : 0; });
+
+  const feeCard = document.getElementById('fee-card');
+  if (!feeCard) return;
+
+  if (count === 0 && outputs.length === 0) { feeCard.style.display = 'none'; return; }
+  feeCard.style.display = '';
+
+  const feeSat = totalIn - totalOut;
+  const feeBTC = feeSat / 1e8;
+
+  const warnEl = document.getElementById('fee-warn');
+
+  if (totalIn === 0 || totalOut === 0) {
+    document.getElementById('fee-sat').textContent = '—';
+    document.getElementById('fee-btc').textContent = '—';
+    document.getElementById('fee-usd').textContent = '—';
+    if (warnEl) warnEl.innerHTML = '';
+    return;
+  }
+
+  document.getElementById('fee-sat').textContent = feeSat.toLocaleString();
+  document.getElementById('fee-btc').textContent = feeBTC.toFixed(8);
+
+  const usdEl = document.getElementById('fee-usd');
+  if (btcPriceUSD && btcPriceUSD > 0) {
+    const feeUSD = feeBTC * btcPriceUSD;
+    usdEl.textContent = '$' + feeUSD.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 4});
+  } else {
+    usdEl.textContent = '—';
+  }
+
+  // estimate vsize for fee rate calc
+  let inCount = 0, p2shCount = 0;
+  inputSlots.forEach(slot => { slot.selected.forEach(i => { inCount++; if (slot.addr && slot.addr.startsWith('3')) p2shCount++; }); });
+  const p2wpkhCount = inCount - p2shCount;
+  const vsize = Math.max(1, Math.ceil(10.5 + p2wpkhCount * 68 + p2shCount * 91 + (outputs.length || 1) * 31));
+  const satPerVb = feeSat / vsize;
+
+  // color the stat cards
+  const satEl = document.getElementById('fee-sat');
+  const satCard = satEl ? satEl.closest('.stat') : null;
+  const usdCard = document.getElementById('fee-usd') ? document.getElementById('fee-usd').closest('.stat') : null;
+  [satCard, usdCard].forEach(el => { if(el) { el.classList.remove('fee-high-bg','fee-extreme-bg'); } });
+  if (satEl) satEl.classList.remove('fee-high','fee-extreme');
+
+  if (warnEl) {
+    if (feeSat < 0) {
+      warnEl.innerHTML = '<span style="color:var(--red);font-size:12px;">输入不足：总输出超出总输入 ' + Math.abs(feeSat).toLocaleString() + ' 聪</span>';
+    } else if (mempoolFeeRates) {
+      const economy = mempoolFeeRates.economyFee || 1;
+      const fast = mempoolFeeRates.fastestFee || 10;
+      const halfHour = mempoolFeeRates.halfHourFee || 5;
+      const rateInfo = '（市场：经济 ' + economy + ' / 半小时 ' + halfHour + ' / 快速 ' + fast + ' sat/vB，本笔约 ' + satPerVb.toFixed(1) + ' sat/vB）';
+      if (satPerVb > fast * 2) {
+        [satCard, usdCard].forEach(el => { if(el) el.classList.add('fee-extreme-bg'); });
+        if (satEl) satEl.classList.add('fee-extreme');
+        warnEl.innerHTML = '<span style="color:var(--red);font-size:12px;">手续费极高，超出当前快速费率 2 倍以上 ' + rateInfo + '</span>';
+      } else if (satPerVb > fast) {
+        [satCard, usdCard].forEach(el => { if(el) el.classList.add('fee-high-bg'); });
+        if (satEl) satEl.classList.add('fee-high');
+        warnEl.innerHTML = '<span style="color:var(--amber);font-size:12px;">手续费偏高，超出当前市场快速费率 ' + rateInfo + '</span>';
+      } else {
+        warnEl.innerHTML = '<span style="color:#555a6e;font-size:11px;">' + rateInfo + '</span>';
+      }
+    } else {
+      warnEl.innerHTML = '';
+    }
+  }
+}
+
+// fetch price on load, refresh every 30s
+fetchBTCPrice();
+setInterval(fetchBTCPrice, 30000);
+
+// ── Recommended fee rate from mempool ──
+let mempoolFeeRates = null; // { fastestFee, halfHourFee, hourFee, economyFee }
+async function fetchMempoolFees() {
+  try {
+    const r = await fetch('https://mempool.space/api/v1/fees/recommended');
+    if (!r.ok) return;
+    mempoolFeeRates = await r.json();
+    recalcFee();
+  } catch(e) {}
+}
+fetchMempoolFees();
+setInterval(fetchMempoolFees, 30000);
+
+/* ── Crypto helpers ── */
+function hexToBytes(h) { const b = []; for (let i = 0; i < h.length; i += 2) b.push(parseInt(h.substr(i, 2), 16)); return b; }
+function bytesToHex(b) { return Array.from(b).map(x => x.toString(16).padStart(2, '0')).join(''); }
+function reverseHex(h) { return h.match(/.{2}/g).reverse().join(''); }
+function hash256(h) { const b = hexToBytes(h); return bytesToHex(sha256.array(sha256.array(b))); }
+function numToLE(n, bytes) { const b = []; let v = BigInt(n); for (let i = 0; i < bytes; i++) { b.push(Number(v & 0xffn)); v >>= 8n; } return bytesToHex(b); }
+function varInt(n) { if (n < 0xfd) return n.toString(16).padStart(2, '0'); if (n <= 0xffff) return 'fd' + numToLE(n, 2); return 'fe' + numToLE(n, 4); }
+const B32C = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+function cvtBits(data, from, to, pad) { let acc = 0, bits = 0; const out = [], maxv = (1 << to) - 1; for (const v of data) { acc = (acc << from) | v; bits += from; while (bits >= to) { bits -= to; out.push((acc >> bits) & maxv); } } if (pad && bits > 0) out.push((acc << (to - bits)) & maxv); return out; }
+function bech32Dec(addr) { addr = addr.toLowerCase(); const sep = addr.lastIndexOf('1'); if (sep < 1) return null; const data = []; for (let i = sep + 1; i < addr.length; i++) { const v = B32C.indexOf(addr[i]); if (v === -1) return null; data.push(v); } const witver = data[0]; const dec = cvtBits(data.slice(1, -6), 5, 8, false); if (!dec) return null; return { version: witver, program: dec }; }
+function b58Dec(s) { const A = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'; let n = BigInt(0); for (const c of s) n = n * 58n + BigInt(A.indexOf(c)); let h = n.toString(16); if (h.length % 2) h = '0' + h; let z = ''; for (const c of s) { if (c === '1') z += '00'; else break; } return z + h; }
+function getSPK(addr) {
+  if (addr.toLowerCase().startsWith('bc1q')) { const d = bech32Dec(addr); if (!d) return null; return '0014' + bytesToHex(d.program); }
+  if (addr.startsWith('3')) { const f = b58Dec(addr); return 'a914' + f.slice(2, f.length - 8) + '87'; }
+  if (addr.startsWith('1')) { const f = b58Dec(addr); return '76a914' + f.slice(2, f.length - 8) + '88ac'; }
+  return null;
+}
+function getSC(addr, manual) {
+  if (addr.toLowerCase().startsWith('bc1q')) { const d = bech32Dec(addr); if (!d) return null; return '1976a914' + bytesToHex(d.program) + '88ac'; }
+  if (addr.startsWith('3')) return manual || null;
+  return null;
+}
+
+function showErr(msg) { document.getElementById('err-box').innerHTML = `<div class="alert alert-err">${msg}</div>`; }
+function clearErr() { document.getElementById('err-box').innerHTML = ''; }
+
+function buildPreimage() {
+  clearErr();
+  const signIdx = parseInt(document.getElementById('sign-idx').value) || 0;
+  const allInps = [];
+  for (const slot of inputSlots) {
+    const addr = slot.addr || '';
+    if (!addr) { showErr('有地址为空，请填写所有 input 地址'); return; }
+    const scEl = document.getElementById(`sc-${slot.id}`);
+    const manualSC = scEl ? scEl.value.trim().toLowerCase() : '';
+    for (const ui of slot.selected) {
+      const u = slot.utxos[ui]; if (!u) continue;
+      const sc = getSC(addr, manualSC);
+      if (!sc) { showErr(`无法获取地址 ${addr} 的 scriptcode，P2SH 请手动填写`); return; }
+      allInps.push({ txid: u.txid, vout: u.vout, amount: u.value, addr, scriptcode: sc });
+    }
+  }
+  if (allInps.length === 0) { showErr('请至少选择一个 UTXO'); return; }
+  if (signIdx < 0 || signIdx >= allInps.length) { showErr(`签名序号 ${signIdx} 超出范围（共 ${allInps.length} 个 input）`); return; }
+  const outData = [];
+  for (const o of outputs) {
+    const addr = (document.getElementById(`oaddr-${o.id}`)?.value || '').trim();
+    const amt = parseInt(document.getElementById(`oamt-${o.id}`)?.value) || 0;
+    if (!addr) { showErr('输出地址不能为空'); return; }
+    // validate address format strictly before deriving SPK
+    const isP2WPKH = /^bc1q[ac-hj-np-z02-9]{38,39}$/i.test(addr);
+    const isP2SH   = /^3[1-9A-HJ-NP-Za-km-z]{33}$/.test(addr);
+    const isP2PKH  = /^1[1-9A-HJ-NP-Za-km-z]{25,33}$/.test(addr);
+    if (!isP2WPKH && !isP2SH && !isP2PKH) {
+      showErr(`Output 地址格式无效：${addr.slice(0,20)}...（仅支持 bc1q / 3 / 1 开头的标准地址）`); return;
+    }
+    const spk = getSPK(addr); if (!spk) { showErr(`无法解析地址：${addr}`); return; }
+    // double-verify: re-derive SPK and compare
+    const spk2 = getSPK(addr);
+    if (spk !== spk2) { showErr(`地址 ${addr.slice(0,20)}... 解析不稳定，请检查`); return; }
+    outData.push({ addr, amount: amt, spk });
+  }
+  if (outData.length === 0) { showErr('请至少添加一个输出'); return; }
+
+  const version = '02000000', locktime = '00000000', sighash = '01000000';
+  const inputsRaw = allInps.map(d => reverseHex(d.txid) + numToLE(d.vout, 4)).join('');
+  const hashInputs = hash256(inputsRaw);
+  const seqsRaw = allInps.map(() => 'ffffffff').join('');
+  const hashSeqs = hash256(seqsRaw);
+  const si = allInps[signIdx];
+  const outpoint = reverseHex(si.txid) + numToLE(si.vout, 4);
+  const inputAmount = numToLE(si.amount, 8);
+  const outputsRaw = outData.map(d => numToLE(d.amount, 8) + varInt(d.spk.length / 2) + d.spk).join('');
+  const hashOutputs = hash256(outputsRaw);
+  const preimage = version + hashInputs + hashSeqs + outpoint + si.scriptcode + inputAmount + 'ffffffff' + hashOutputs + locktime + sighash;
+  const preimageHash = hash256(preimage);
+  lastPD = { version, hashInputs, hashSeqs, outpoint, scriptcode: si.scriptcode, inputAmount, hashOutputs, locktime, sighash, preimage, preimageHash, allInps, outData, signIdx };
+  renderResult(lastPD);
+}
+
+function renderResult(d) {
+  document.getElementById('result-box').innerHTML = `
+  <div class="card" style="margin-top:0;">
+    <div class="sec-title">Preimage 分解 — Input #${d.signIdx}</div>
+    <div class="legend-row">
+      <div class="lg-item"><div class="lg-dot" style="background:#86efac;"></div>Version</div>
+      <div class="lg-item"><div class="lg-dot" style="background:#fcd34d;"></div>hash(inputs)</div>
+      <div class="lg-item"><div class="lg-dot" style="background:#6ee7b7;"></div>hash(seqs)</div>
+      <div class="lg-item"><div class="lg-dot" style="background:#fbcfe8;"></div>outpoint</div>
+      <div class="lg-item"><div class="lg-dot" style="background:#f0abfc;"></div>scriptcode</div>
+      <div class="lg-item"><div class="lg-dot" style="background:#93c5fd;"></div>amount</div>
+      <div class="lg-item"><div class="lg-dot" style="background:#fda4af;"></div>hash(outputs)</div>
+      <div class="lg-item"><div class="lg-dot" style="background:#94a3b8;"></div>locktime+sighash</div>
+    </div>
+    ${[['hash256(inputs)', d.hashInputs], ['hash256(sequences)', d.hashSeqs], ['hash256(outputs)', d.hashOutputs]].map(([lbl, val]) => `
+    <div style="margin-bottom:12px;">
+      <div style="font-size:11px;color:#8b90a0;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;">
+        <span>${lbl}</span><button class="copy-btn" onclick="cp(this,'${val}')">复制</button>
+      </div>
+      <div class="pre-box">${val}</div>
+    </div>`).join('')}
+    <div class="divider"></div>
+    <div style="margin-bottom:12px;">
+      <div style="font-size:11px;color:#8b90a0;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;">
+        <span>完整 Preimage</span><button class="copy-btn" onclick="cp(this,'${d.preimage}')">复制</button>
+      </div>
+      <div class="pre-box">
+        <span class="pre-v">${d.version}</span><span class="pre-hi">${d.hashInputs}</span><span class="pre-sq">${d.hashSeqs}</span><span class="pre-op">${d.outpoint}</span><span class="pre-sc">${d.scriptcode}</span><span class="pre-am">${d.inputAmount}</span><span class="pre-sq">ffffffff</span><span class="pre-ho">${d.hashOutputs}</span><span class="pre-lk">${d.locktime}${d.sighash}</span>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <div style="margin-bottom:12px;">
+      <div style="font-size:11px;color:#8b90a0;margin-bottom:6px;font-weight:500;">收款地址核对（签名前请逐一确认）</div>
+      ${d.outData.map((o,i) => `
+        <div style="display:flex;align-items:baseline;gap:8px;padding:5px 8px;background:var(--bg3);border-radius:6px;margin-bottom:4px;font-family:var(--font-mono);font-size:11px;">
+          <span style="color:#555a6e;flex-shrink:0;">Out#${i}</span>
+          <span style="color:#e8eaf0;word-break:break-all;">${o.addr}</span>
+          <span style="color:#555a6e;flex-shrink:0;">${(o.amount/1e8).toFixed(8)} BTC</span>
+        </div>
+        <div style="padding:3px 8px 6px 8px;font-family:var(--font-mono);font-size:10px;color:#555a6e;">
+          SPK: <span style="color:#3b5c38;">${o.spk}</span>
+        </div>`).join('')}
+    </div>
+    <div class="divider"></div>
+    <div style="font-size:13px;font-weight:600;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
+      <span style="color:#60a5fa;">HASH256(Preimage) — 用私钥签名此值</span>
+      <button class="copy-btn" onclick="cp(this,'${d.preimageHash}')">复制</button>
+    </div>
+    <div id="qr-hash-wrap" onmouseenter="showQR('qr-hash-tip',this)" onmouseleave="hideQR('qr-hash-tip')">
+      <div class="hash-box" style="cursor:crosshair;" title="鼠标悬停查看二维码">${d.preimageHash}</div>
+    </div>
+    <div id="qr-hash-tip" class="qr-popup">
+      <div id="qr-hash-canvas" style="width:200px;height:200px;"></div>
+      <div class="qr-tooltip-label">HASH256 — 扫码传输至签名设备</div>
+    </div>
+    <div style="font-size:11px;color:#8b90a0;margin-top:10px;">
+      用 secp256k1 私钥对此 HASH256 做 ECDSA 签名，得到 DER 格式签名后，前往"合并签名广播"标签页。悬停可查看二维码。
+    </div>
+  </div>`;
+  // generate QR for hash after DOM settles
+  setTimeout(() => {
+    const el = document.getElementById('qr-hash-canvas');
+    if (el && typeof QRCode !== 'undefined') {
+      el.innerHTML = '';
+      new QRCode(el, { text: d.preimageHash, width: 200, height: 200, colorDark: '#60a5fa', colorLight: '#0a0e1a', correctLevel: QRCode.CorrectLevel.M });
+    }
+  }, 50);
+}
+
+let sigCache = {};  // {i: {der, pub}} — persists across tab switches
+let sigLastPDRef = null; // track if lastPD changed
+
+function renderSigWrapSafe() {
+  const w = document.getElementById('sig-wrap');
+  if (!lastPD) { w.innerHTML = '<div class="alert alert-info">请先在构造交易页生成预镜像。</div>'; return; }
+  const d = lastPD;
+
+  // If lastPD changed (new preimage built), save old inputs then rebuild
+  if (sigLastPDRef !== lastPD) {
+    // save any existing inputs before wiping
+    saveSigCache(d.allInps.length);
+    sigLastPDRef = lastPD;
+    buildSigDOM(d);
+  } else {
+    // same lastPD — DOM already exists, just ensure fields are present
+    // if DOM was cleared externally, rebuild and restore
+    if (!document.getElementById('sig-der-0')) {
+      buildSigDOM(d);
+    }
+  }
+}
+
+function saveSigCache(count) {
+  for (let i = 0; i < count; i++) {
+    const derEl = document.getElementById('sig-der-' + i);
+    const pubEl = document.getElementById('sig-pub-' + i);
+    if (derEl || pubEl) {
+      sigCache[i] = {
+        der: derEl ? derEl.value : (sigCache[i]?.der || ''),
+        pub: pubEl ? pubEl.value : (sigCache[i]?.pub || '')
+      };
+    }
+  }
+}
+
+function buildSigDOM(d) {
+  const w = document.getElementById('sig-wrap');
+  w.innerHTML = d.allInps.map((inp, i) => {
+    const cached = sigCache[i] || {};
+    return `
+    <div class="out-block">
+      <div class="out-hdr">
+        <span>Input #${i}${i === d.signIdx ? ' <span class="badge badge-blue">已生成预镜像</span>' : ''}</span>
+      </div>
+      <div style="font-size:11px;color:#8b90a0;font-family:var(--font-mono);margin-bottom:8px;word-break:break-all;">
+        ${inp.txid.slice(0, 20)}... &nbsp;vout: ${inp.vout} &nbsp;(${inp.amount.toLocaleString()} 聪)
+      </div>
+      ${i === d.signIdx ? '<div style="font-size:11px;margin-bottom:8px;">HASH256: <span style="color:#60a5fa;font-family:var(--font-mono);">' + d.preimageHash + '</span></div>' : ''}
+      <div class="field" style="margin-bottom:8px;">
+        <label>DER 签名 hex（不含 sighash byte）</label>
+        <input id="sig-der-${i}" placeholder="3044... 或 3045..." value="${cached.der || ''}">
+      </div>
+      <div class="field">
+        <label>压缩公钥 hex（02/03 开头，共 66 个字符）</label>
+        <input id="sig-pub-${i}" placeholder="02 或 03..." value="${cached.pub || ''}">
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderSigWrap() { renderSigWrapSafe(); }
+
+function buildFinalTx() {
+  if (!lastPD) return;
+  const d = lastPD, errs = [];
+  saveSigCache(d.allInps.length);
+  const missingInputs = [];
+  const sigs = d.allInps.map((_, i) => {
+    const cached = sigCache[i] || {};
+    let der = ((document.getElementById('sig-der-' + i)?.value) || cached.der || '').trim().toLowerCase();
+    let pub = ((document.getElementById('sig-pub-' + i)?.value) || cached.pub || '').trim().toLowerCase();
+    if (!der) { der = 'x'.repeat(144); missingInputs.push('Input #' + i + ' DER签名'); }
+    if (!pub || pub.length !== 66) { pub = 'x'.repeat(66); missingInputs.push('Input #' + i + ' 公钥'); }
+    return { der, pub };
+  });
+  try {
+    const parts = [];
+    parts.push({ label: 'version', hex: '02000000' });
+    parts.push({ label: 'marker + flag', hex: '0001' });
+    parts.push({ label: 'input count', hex: varInt(d.allInps.length) });
+
+    d.allInps.forEach((inp, i) => {
+      const txidLE = reverseHex(inp.txid);
+      const voutHex = numToLE(inp.vout, 4);
+      const isP2SH = inp.addr.startsWith('3');
+      let scriptSigHex = '';
+      let scriptSigLabel = '';
+
+      if (isP2SH) {
+        // scriptcode 格式: 1976a914{20B hash160}88ac
+        // redeemScript = 0014{hash160} (22B)
+        // scriptSig = varint(22) + 0014{hash160}
+        // scriptSigSize = varint(23)
+        const sc = inp.scriptcode;
+        if (!sc || sc.length < 46) throw new Error('Input #' + i + ' scriptcode 格式有误，期望 1976a914{20B}88ac');
+        const hash160 = sc.slice(8, 48); // 跳过 19 76 a9 14 各1字节(2hex) = 8字符
+        const redeemScript = '0014' + hash160;
+        const rsLen = varInt(redeemScript.length / 2);   // 16 (=22)
+        const scriptSigBody = rsLen + redeemScript;
+        const scriptSigSize = varInt(scriptSigBody.length / 2); // 17 (=23)
+        scriptSigHex = scriptSigSize + scriptSigBody;
+        scriptSigLabel = 'input #' + i + ' scriptSigSize+scriptSig [P2SH redeemScript=0014' + hash160 + ']';
+      } else {
+        scriptSigHex = '00';
+        scriptSigLabel = 'input #' + i + ' scriptSigSize=00 (P2WPKH)';
+      }
+
+      parts.push({ label: 'input #' + i + ' txid (LE)', hex: txidLE });
+      parts.push({ label: 'input #' + i + ' vout', hex: voutHex });
+      parts.push({ label: scriptSigLabel, hex: scriptSigHex });
+      parts.push({ label: 'input #' + i + ' sequence', hex: 'ffffffff' });
+    });
+
+    parts.push({ label: 'output count', hex: varInt(d.outData.length) });
+    d.outData.forEach((o, i) => {
+      parts.push({ label: `output #${i} value`, hex: numToLE(o.amount, 8) });
+      parts.push({ label: `output #${i} scriptPubKey`, hex: varInt(o.spk.length / 2) + o.spk });
+    });
+
+    d.allInps.forEach((_, i) => {
+      const s = sigs[i];
+      const derWithSighash = s.der + '01';
+      const sigLen = varInt(derWithSighash.length / 2);
+      const pubLen = varInt(s.pub.length / 2);
+      parts.push({ label: `witness #${i} stack count`, hex: '02' });
+      parts.push({ label: `witness #${i} sig len + sig + sighash`, hex: sigLen + derWithSighash });
+      parts.push({ label: `witness #${i} pubkey len + pubkey`, hex: pubLen + s.pub });
+    });
+
+    parts.push({ label: 'locktime', hex: '00000000' });
+
+    const tx = parts.map(p => p.hex).join('');
+
+    const rows = parts.map(p =>
+      `<tr>
+        <td style="padding:4px 10px;color:#8b90a0;white-space:nowrap;font-size:11px;">${p.label}</td>
+        <td style="padding:4px 10px;font-family:var(--font-mono);font-size:11px;word-break:break-all;color:#e8eaf0;">${p.hex}</td>
+      </tr>`
+    ).join('');
+
+    const missingBanner = missingInputs.length > 0
+      ? '<div class="alert alert-warn" style="margin-bottom:12px;">以下字段未填写，已用占位符 XXXX 代替，请补全后重新构造：<br>' + missingInputs.join('、') + '</div>'
+      : '';
+
+    document.getElementById('final-box').innerHTML = `
+    <div class="card">
+      ${missingBanner}
+      <div class="sec-title" style="display:flex;justify-content:space-between;align-items:center;">
+        <span>最终交易 Hex（可广播）</span>
+        <button class="copy-btn" onclick="cp(this,'${tx}')">复制全部</button>
+      </div>
+      <div style="overflow-x:auto;margin-bottom:12px;">
+        <table style="width:100%;border-collapse:collapse;border:0.5px solid var(--color-border-tertiary);border-radius:var(--radius);">
+          <thead><tr>
+            <th style="padding:5px 10px;font-size:10px;font-weight:600;color:#8b90a0;text-align:left;border-bottom:1px solid #222;width:220px;">字段</th>
+            <th style="padding:5px 10px;font-size:10px;font-weight:600;color:#8b90a0;text-align:left;border-bottom:1px solid #222;">Hex</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div style="font-size:11px;color:#8b90a0;margin-bottom:6px;">完整 hex：</div>
+      <div id="qr-tx-wrap" onmouseenter="showQR('qr-tx-tip',this)" onmouseleave="hideQR('qr-tx-tip')">
+        <div class="pre-box" style="word-break:break-all;font-size:11px;cursor:crosshair;" title="鼠标悬停查看二维码">${tx}</div>
+      </div>
+      <div id="qr-tx-tip" class="qr-popup">
+        <div id="qr-tx-canvas" style="width:220px;height:220px;"></div>
+        <div class="qr-tooltip-label">交易 Hex — 扫码传输</div>
+        <div style="font-size:10px;color:#555a6e;margin-top:4px;text-align:center;">数据较大时建议使用复制功能</div>
+      </div>
+      <div style="font-size:12px;color:#8b90a0;margin-top:12px;line-height:1.8;">
+        广播方式：<br>
+        · <a href="https://blockstream.info/tx/push" target="_blank">blockstream.info/tx/push</a><br>
+        · <a href="https://mempool.space/tx/push" target="_blank">mempool.space/tx/push</a><br>
+        · <code style="background:var(--bg3);padding:2px 6px;border-radius:4px;">bitcoin-cli sendrawtransaction &lt;hex&gt;</code>
+      </div>
+    </div>`;
+    // generate QR for tx hex
+    setTimeout(() => {
+      const el = document.getElementById('qr-tx-canvas');
+      if (el && typeof QRCode !== 'undefined') {
+        el.innerHTML = '';
+        try {
+          new QRCode(el, { text: tx, width: 220, height: 220, colorDark: '#97C459', colorLight: '#0a0e1a', correctLevel: QRCode.CorrectLevel.L });
+        } catch(e) {
+          el.innerHTML = '<div style="color:#8b90a0;font-size:10px;padding:8px;">数据过大，无法生成二维码，请使用复制功能</div>';
+        }
+      }
+    }, 50);
+  } catch (e) {
+    document.getElementById('final-box').innerHTML = `<div class="alert alert-err">构造失败: ${e.message}</div>`;
+  }
+}
+
+function cp(btn, text) {
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = '已复制';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = '复制'; btn.classList.remove('copied'); }, 1500);
+  }).catch(() => {});
+}
+
+function clearAll() {
+  inputSlots = []; outputs = []; lastPD = null;
+  sigCache = {}; sigLastPDRef = null;
+  renderInputs(); renderOutputs();
+  document.getElementById('result-box').innerHTML = '';
+  document.getElementById('err-box').innerHTML = '';
+  document.getElementById('final-box').innerHTML = '';
+  document.getElementById('sig-wrap').innerHTML = '';
+  document.getElementById('stat-summary').style.display = 'none';
+}
+
+addInputSlot();
+addOutput();
+renderInputs();
+renderOutputs();
+</script>
+</body>
+</html>
