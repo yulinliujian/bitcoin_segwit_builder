@@ -301,8 +301,12 @@ function goTab(name, el) {
 }
 
 function addInputSlot() {
-  inputSlots.push({ id: ++uid, utxos: [], selected: [], addr: '', addrType: '', loading: false, fetchErr: '', apiLog: [], loadingMsg: '' });
+  inputSlots.push({ id: ++uid, utxos: [], selected: [], addr: '', addrType: '', loading: false, fetchErr: '', apiLog: [], loadingMsg: '', sequence: 'ffffffff' });
   renderInputs();
+}
+function onSequenceChange(id, val) {
+  const slot = inputSlots.find(s => s.id === id); if (!slot) return;
+  slot.sequence = (val === 'fdffffff') ? 'fdffffff' : 'ffffffff';
 }
 function removeSlot(id) { inputSlots = inputSlots.filter(s => s.id !== id); renderInputs(); }
 function addOutput() { outputs.push({ id: ++uid }); renderOutputs(); }
@@ -358,6 +362,16 @@ function renderInputs() {
         <div id="sc-hint-${slot.id}" style="font-size:11px;margin-top:3px;min-height:14px;">${slot.scHint || ''}</div>
       </div>` : '';
 
+    const seq = slot.sequence || 'ffffffff';
+    const seqField = `
+      <div class="field" style="margin-top:8px;max-width:260px;">
+        <label>nSequence（可选，默认 0xffffffff）</label>
+        <select id="seq-${slot.id}" onchange="onSequenceChange(${slot.id}, this.value)">
+          <option value="ffffffff" ${seq === 'ffffffff' ? 'selected' : ''}>0xffffffff（默认 / Final）</option>
+          <option value="fdffffff" ${seq === 'fdffffff' ? 'selected' : ''}>0xfdffffff（RBF opt-in）</option>
+        </select>
+      </div>`;
+
     return `<div class="inp-block">
       <div class="inp-hdr">
         <div class="inp-hdr-left">Input 地址 #${si} ${typeBadge}</div>
@@ -370,6 +384,7 @@ function renderInputs() {
         </div>
         <button class="btn btn-primary" onclick="fetchUTXO(${slot.id})">查询 UTXO</button>
       </div>
+      ${seqField}
       ${scField}
       ${utxoArea}
     </div>`;
@@ -931,11 +946,13 @@ function buildPreimage() {
     if (!addr) { showErr('有地址为空，请填写所有 input 地址'); return; }
     const scEl = document.getElementById(`sc-${slot.id}`);
     const manualSC = scEl ? scEl.value.trim().toLowerCase() : '';
+    const seqEl = document.getElementById(`seq-${slot.id}`);
+    const sequence = (seqEl ? seqEl.value : slot.sequence) === 'fdffffff' ? 'fdffffff' : 'ffffffff';
     for (const ui of slot.selected) {
       const u = slot.utxos[ui]; if (!u) continue;
       const sc = getSC(addr, manualSC);
       if (!sc) { showErr(`无法获取地址 ${addr} 的 scriptcode，P2SH 请手动填写`); return; }
-      allInps.push({ txid: u.txid, vout: u.vout, amount: u.value, addr, scriptcode: sc });
+      allInps.push({ txid: u.txid, vout: u.vout, amount: u.value, addr, scriptcode: sc, sequence });
     }
   }
   if (allInps.length === 0) { showErr('请至少选择一个 UTXO'); return; }
@@ -963,16 +980,16 @@ function buildPreimage() {
   const version = '02000000', locktime = '00000000', sighash = '01000000';
   const inputsRaw = allInps.map(d => reverseHex(d.txid) + numToLE(d.vout, 4)).join('');
   const hashInputs = hash256(inputsRaw);
-  const seqsRaw = allInps.map(() => 'ffffffff').join('');
+  const seqsRaw = allInps.map(d => d.sequence).join('');
   const hashSeqs = hash256(seqsRaw);
   const si = allInps[signIdx];
   const outpoint = reverseHex(si.txid) + numToLE(si.vout, 4);
   const inputAmount = numToLE(si.amount, 8);
   const outputsRaw = outData.map(d => numToLE(d.amount, 8) + varInt(d.spk.length / 2) + d.spk).join('');
   const hashOutputs = hash256(outputsRaw);
-  const preimage = version + hashInputs + hashSeqs + outpoint + si.scriptcode + inputAmount + 'ffffffff' + hashOutputs + locktime + sighash;
+  const preimage = version + hashInputs + hashSeqs + outpoint + si.scriptcode + inputAmount + si.sequence + hashOutputs + locktime + sighash;
   const preimageHash = hash256(preimage);
-  lastPD = { version, hashInputs, hashSeqs, outpoint, scriptcode: si.scriptcode, inputAmount, hashOutputs, locktime, sighash, preimage, preimageHash, allInps, outData, signIdx };
+  lastPD = { version, hashInputs, hashSeqs, outpoint, scriptcode: si.scriptcode, inputAmount, sequence: si.sequence, hashOutputs, locktime, sighash, preimage, preimageHash, allInps, outData, signIdx };
   renderResult(lastPD);
 }
 
@@ -1003,7 +1020,7 @@ function renderResult(d) {
         <span>完整 Preimage</span><button class="copy-btn" onclick="cp(this,'${d.preimage}')">复制</button>
       </div>
       <div class="pre-box">
-        <span class="pre-v">${d.version}</span><span class="pre-hi">${d.hashInputs}</span><span class="pre-sq">${d.hashSeqs}</span><span class="pre-op">${d.outpoint}</span><span class="pre-sc">${d.scriptcode}</span><span class="pre-am">${d.inputAmount}</span><span class="pre-sq">ffffffff</span><span class="pre-ho">${d.hashOutputs}</span><span class="pre-lk">${d.locktime}${d.sighash}</span>
+        <span class="pre-v">${d.version}</span><span class="pre-hi">${d.hashInputs}</span><span class="pre-sq">${d.hashSeqs}</span><span class="pre-op">${d.outpoint}</span><span class="pre-sc">${d.scriptcode}</span><span class="pre-am">${d.inputAmount}</span><span class="pre-sq">${d.sequence}</span><span class="pre-ho">${d.hashOutputs}</span><span class="pre-lk">${d.locktime}${d.sighash}</span>
       </div>
     </div>
     <div class="divider"></div>
@@ -1091,7 +1108,7 @@ function buildSigDOM(d) {
         <span>Input #${i}${i === d.signIdx ? ' <span class="badge badge-blue">已生成预镜像</span>' : ''}</span>
       </div>
       <div style="font-size:11px;color:#8b90a0;font-family:var(--font-mono);margin-bottom:8px;word-break:break-all;">
-        ${inp.txid.slice(0, 20)}... &nbsp;vout: ${inp.vout} &nbsp;(${inp.amount.toLocaleString()} 聪)
+        ${inp.txid.slice(0, 20)}... &nbsp;vout: ${inp.vout} &nbsp;(${inp.amount.toLocaleString()} 聪) &nbsp;sequence: ${inp.sequence || 'ffffffff'}
       </div>
       ${i === d.signIdx ? '<div style="font-size:11px;margin-bottom:8px;">HASH256: <span style="color:#60a5fa;font-family:var(--font-mono);">' + d.preimageHash + '</span></div>' : ''}
       <div class="field" style="margin-bottom:8px;">
@@ -1156,7 +1173,7 @@ function buildFinalTx() {
       parts.push({ label: 'input #' + i + ' txid (LE)', hex: txidLE });
       parts.push({ label: 'input #' + i + ' vout', hex: voutHex });
       parts.push({ label: scriptSigLabel, hex: scriptSigHex });
-      parts.push({ label: 'input #' + i + ' sequence', hex: 'ffffffff' });
+      parts.push({ label: 'input #' + i + ' sequence', hex: inp.sequence || 'ffffffff' });
     });
 
     parts.push({ label: 'output count', hex: varInt(d.outData.length) });
